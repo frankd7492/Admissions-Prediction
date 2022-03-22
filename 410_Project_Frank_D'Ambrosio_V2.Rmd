@@ -1,0 +1,222 @@
+---
+title: "410 Project V2"
+author: "Frank D'Ambrosio"
+date: "4/28/2021"
+output: html_document
+---
+Libraries
+```{r}
+library(dplyr)
+library(plyr)
+library(ggplot2)
+library(ggpubr)
+library(rms)
+library(VGAM)
+library(MASS)
+library(gam)
+library(lmtest)
+library(tree)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(party)
+
+```
+
+import data set
+```{r}
+admission <- read.csv("Admission_Predict.csv" )
+head(admission)
+
+```
+
+GOALS:
+find significance of variables that go into the rating of university that a student applies to
+  -the variables known by the student before they apply is their GRE.Score, CGPA, TOEFL.Score, and Research
+  -predict university rating applied to based on these variables
+      -Cumulitive Logit model for University.Rating
+      
+Significance of variables for Chance.of.Admit
+  -create a GLM for predicting Chance.of.Admit using all significant variables and University.Rating as levels?
+
+
+
+Let's make a model for predicting chance of admission
+```{r}
+
+#str(admission)
+#get rid of serial number
+ad2 <- subset(admission, select=c(Chance.of.Admit, GRE.Score, TOEFL.Score, University.Rating, SOP, LOR, CGPA, Research))
+ad2$Research <- as.factor(ad2$Research)
+str(ad2)
+attach(ad2)
+ad.frame <- data.frame(GRE.Score, TOEFL.Score, University.Rating, SOP, LOR, CGPA, Research )
+
+#bestglm(ad.frame, IC = "BIC")
+
+fit1 <- glm(Chance.of.Admit ~ . , data=ad2 , family = quasibinomial)
+summary(fit1)
+#SOP not significant
+
+fit2 <- glm(Chance.of.Admit ~ . -SOP, data=ad2, family = quasibinomial)
+summary(fit2)
+
+fit3 <- glm(Chance.of.Admit ~ . - SOP - University.Rating, data = ad2, family = quasibinomial)
+summary(fit3)
+
+
+lrtest(fit3, fit2)
+
+nested <- glm(Chance.of.Admit ~ . - SOP - University.Rating, data=ad2 , family = quasibinomial)
+complex <- glm(Chance.of.Admit ~ GRE.Score + TOEFL.Score + LOR + University.Rating + Research + CGPA, data=ad2 , family = quasibinomial)
+lrtest(nested, complex)
+
+#get rid of uni rating
+summary(nested)
+fit.final <- nested
+summary(fit.final)
+
+
+plot(fit.final)
+plot(ad2)
+
+set.seed(7492)
+indices <-  sample(300,100)
+T1 <- ad2[indices,]
+T2 <- ad2[-indices,]
+
+
+fit <- glm(Chance.of.Admit ~. -University.Rating - SOP, data = T1 , family =  quasibinomial)
+
+preds <- predict(fit, T2)
+
+mse <- mean((preds-T2$Chance.of.Admit)^2)
+#mse = .41225
+
+exp(range(preds))/(1+ exp(range(preds)))
+```
+
+Why is University rating insignificant in this model?
+```{r}
+attach(ad2)
+
+
+
+
+ad.ur <- ggboxplot(admission, x = "University.Rating",
+          y = "Chance.of.Admit",
+          bgcolor="black",
+          color = "University.Rating",
+          palette = c("darkgreen" , "blue", "purple", "orange", "red")
+          )
+ad.ur +
+  bgcolor("#BFD5E3")+
+  border("#BFD5E3")
+
+
+cor.test(Chance.of.Admit, University.Rating)
+#we can see University and Chance are strongly correlation with a pvalue 2.2e-16
+
+
+
+
+#check out GPA
+g.ur.GPA <- ggboxplot(admission, x = "University.Rating",
+          y = "CGPA",
+          bgcolor="black",
+          color = "University.Rating",
+          palette = c("darkgreen" , "blue", "purple", "orange", "red")
+          )
+g.ur.GPA +
+  bgcolor("#BFD5E3")+
+  border("#BFD5E3")
+
+cor.test(CGPA, University.Rating)
+
+#now we see CGPA and Uni rating are closely correlated with pvaly also 2.2e-16
+
+#look at GRE Score
+g.ur.GRE <- ggboxplot(admission, x = "University.Rating",
+          y = "GRE.Score",
+          bgcolor="black",
+          color = "University.Rating",
+          palette = c("darkgreen" , "blue", "purple", "orange", "red")
+          )
+g.ur.GRE +
+  bgcolor("#BFD5E3")+
+  border("#BFD5E3")
+
+cor.test(GRE.Score, University.Rating)
+
+#GRE Score and University rating are closely correlated too.
+
+#now TOEFL.Score
+
+g.ur.TOEFL <- ggboxplot(admission, x = "University.Rating",
+          y = "TOEFL.Score",
+          bgcolor="black",
+          color = "University.Rating",
+          palette = c("darkgreen" , "blue", "purple", "orange", "red")
+          )
+g.ur.TOEFL +
+  bgcolor("#BFD5E3")+
+  border("#BFD5E3")
+
+cor.test(TOEFL.Score, University.Rating)
+
+
+```
+
+Can we predict University Rating by the above three
+```{r}
+attach(ad2)
+ad2$University.Rating <- as.ordered(ad2$University.Rating)
+set.seed(7492)
+indices = sample(300,100)
+T1 <- ad2[indices,]
+T2 <- ad2[-indices,]
+str(T1)
+str(T2)
+
+tree1 <- tree(as.ordered(University.Rating)~ CGPA + GRE.Score , data = T1,  mincut=3  )
+summary(tree1)
+plot(tree1)
+text(tree1)
+
+x <- ctree((as.ordered(University.Rating)~ CGPA + GRE.Score + Chance.of.Admit ))
+plot(x, type = "simple")
+
+prp1 <- rpart(as.ordered(University.Rating)~ CGPA + GRE.Score ,  data = T1,minbucket = 3 )
+#text(prp1)
+rpart.plot(prp1, tweak = 1.9, box.palette = list("darkgreen" , "blue", "purple", "orange", "red"))
+
+
+rf1 <- randomForest(as.ordered(University.Rating)~ CGPA + GRE.Score + TOEFL.Score , data = T1, ntree=280 , mtry=2)
+#plot(rf1)
+
+summary(rf1)
+
+preds <- predict(rf1, T2)
+
+
+mse <- mean((as.numeric(preds)-as.numeric(T2$University.Rating))^2)
+
+mse
+#MSE of 0.8333 but with the levels only ranging 1-5 this might still be big
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
